@@ -29,6 +29,7 @@ setuptools>=65.5.1
 numpy<2.0.0
 pandas
 python-dotenv
+nltk
 
 # Core Dependencies
 #pydantic==2.5.2

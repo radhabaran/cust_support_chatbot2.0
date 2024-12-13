@@ -7,12 +7,14 @@ from langchain.schema import HumanMessage, AIMessage, SystemMessage
 from langchain_community.embeddings import OpenAIEmbeddings
 from langchain_community.vectorstores import Chroma
 from langchain.schema import Document
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+# from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_text_splitters import NLTKTextSplitter
 import pandas as pd
 import shutil
 import warnings
 from dotenv import load_dotenv
-
+import nltk
+nltk.download('punkt_tab')
 warnings.filterwarnings("ignore")
 
 __import__('pysqlite3')
@@ -148,11 +150,18 @@ class ProductReviewAgent:
 
     def _split_text(self, documents: list[Document]) -> list[Document]:
         """Split documents into chunks"""
-        splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1000,
-            chunk_overlap=300,
-            length_function=len,
-            add_start_index=True,
+        # splitter = RecursiveCharacterTextSplitter(
+        #     chunk_size=1000,
+        #     chunk_overlap=300,
+        #     length_function=len,
+        #     add_start_index=True,
+        # )
+
+
+        #Split documents into chunks using sentence-based splitting"""
+        splitter = NLTKTextSplitter(
+            chunk_size=2000,
+            chunk_overlap=100
         )
         return splitter.split_documents(documents)
 
