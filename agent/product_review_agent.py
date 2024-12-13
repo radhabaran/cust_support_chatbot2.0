@@ -1,7 +1,7 @@
 # product_review_agent.py
 import os
 import logging
-from typing import Dict
+from typing import Dict, List
 from langchain_anthropic import ChatAnthropic
 from langchain.schema import HumanMessage, AIMessage, SystemMessage
 from langchain_community.embeddings import OpenAIEmbeddings
@@ -12,6 +12,8 @@ from langchain_text_splitters import NLTKTextSplitter
 import pandas as pd
 import shutil
 import warnings
+from functools import lru_cache
+import re  # also built-in
 from dotenv import load_dotenv
 import nltk
 nltk.download('punkt_tab')
@@ -36,10 +38,26 @@ os.environ['OPENAI_API_KEY'] = api_key
 
 class ProductReviewAgent:
     def __init__(self, model_name="claude-3-5-sonnet-20240620"):
-        self.llm = ChatAnthropic(model=model_name)
+        self.llm = ChatAnthropic(
+            model=model_name,
+            max_tokens=300,
+            temperature=0.7
+        )
         self.embeddings = OpenAIEmbeddings(model="text-embedding-ada-002")
-        self.vectorstore = None
         
+        # Pre-compile patterns once during initialization
+        self.patterns = {
+            'price': re.compile(r'price|cost|how\s+much', re.I),
+            'review': re.compile(r'review|rating|experience', re.I),
+            'spec': re.compile(r'spec|feature|detail|technical', re.I)
+        }
+        # Pre-define enhancement keywords
+        self.enhancements = {
+            'price': ' price cost',
+            'review': ' review rating',
+            'spec': ' specifications features'
+        }
+
         self.system_prompt = """
         Role and Capabilities:
         You are an AI customer service specialist for Amazon. You respond strictly based on the context provided and 
@@ -112,7 +130,16 @@ class ProductReviewAgent:
         Remember: Always verify information against the provided context or in the previous chat history before 
         responding. Don't make assumptions or provide speculative information.
         """
+        self.vectorstore = None
         self.initialize_vectorstore()
+
+    @lru_cache(maxsize=1000)
+    def _enhance_query(self, query: str) -> str:
+        # Quick pattern matching with early return
+        for intent, pattern in self.patterns.items():
+            if pattern.search(query):
+                return query + self.enhancements[intent]
+        return query  # Return original if no pattern matches
 
     def initialize_vectorstore(self, vectorstore_path: str = 'data/chroma/'):
         """Initialize vector store with product data"""
@@ -171,26 +198,36 @@ class ProductReviewAgent:
         try:
             messages = state["messages"]
             query = messages[-1].content
+            enhanced_query = self._enhance_query(query)
             thread_id = config["configurable"]["thread_id"]
             
             logger.info(f"Processing review query for thread {thread_id}")
             
             # Retrieve relevant documents
+            # retriever = self.vectorstore.as_retriever(
+            #     search_type="mmr", 
+            #     search_kwargs={"k": 2, "fetch_k": 5}
+            # )
+
+            # 1. Simplify retrieval first
             retriever = self.vectorstore.as_retriever(
-                search_type="mmr", 
-                search_kwargs={"k": 2, "fetch_k": 5}
+                search_type="similarity",  # Changed from MMR to simple similarity
+                search_kwargs={"k": 2}     # Reduced number of results
             )
-            results = retriever.invoke(query)
+
+            results = retriever.invoke(enhanced_query)
             
-            if not results:
-                return {"error": "No relevant information found"}
-                
+            # if not results:
+            #     return {"error": "No relevant information found"}
+
+            # 2. Add basic context compression  
             context = "\n\n".join([doc.page_content for doc in results])
-            
+            compressed_context = context[:3000]  # Simple length-based compression
+
             # Format messages with system prompt
             messages = [
                 SystemMessage(content=self.system_prompt),
-                HumanMessage(content=self._format_review_prompt(query, context))
+                HumanMessage(content=self._format_review_prompt(query, compressed_context))
             ]
             response = self.llm.invoke(messages)
             
