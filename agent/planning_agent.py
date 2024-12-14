@@ -9,6 +9,9 @@ from agent.router_agent import planning_route_query
 from agent.generic_agent import process_generic_query
 from agent.product_review_agent import setup_product_review_agent
 from agent.composer_agent import compose_response
+from redis import Redis
+from pymilvus import connections, utility
+from functools import lru_cache
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -35,9 +38,36 @@ Example:
     """
 
 
+@lru_cache()
+def get_service_connections():
+    """Initialize and cache Redis connections"""
+    try:
+        # Redis connection
+        redis_client = Redis(
+            host=os.getenv('REDIS_HOST', 'localhost'),
+            port=int(os.getenv('REDIS_PORT', 6379)),
+            password=os.getenv('REDIS_PASSWORD'),
+            db=0,
+            decode_responses=True
+        )
+        
+        return redis_client
+        
+    except Exception as e:
+        logger.error(f"Error initializing service connections: {e}")
+        raise
+
+
 def get_product_info(state: Dict, config: dict) -> Dict:
     """Handle product-related queries using ProductReviewAgent"""
     try:
+        # Get Redis connection
+        redis_client = get_service_connections()
+
+        # Verify Milvus connection is available
+        if not connections.has_connection("default"):
+            raise ConnectionError("Milvus connection not available")
+
         product_agent = setup_product_review_agent()
         response = product_agent.process_review_query(state, config)
         
